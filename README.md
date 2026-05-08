@@ -1,162 +1,154 @@
-# Mock Customer Data Server
+# Mock Customer Data Server & Customer Pipeline Service
 
-A lightweight REST API server built with Flask that serves mock customer data. Designed for front-end development, integration testing, and prototyping without requiring a real database.
+A two-service system for serving and ingesting mock customer data. Built for integration testing, pipeline development, and prototyping.
 
-## Features
+## Architecture
 
-- Paginated customer listing with configurable page size
-- Customer lookup by ID
-- Health check endpoint
-- Docker support for containerized deployment
-- JSON-file-based data store — zero database setup required
+```
+┌─────────────────┐        ┌──────────────────────┐        ┌──────────────┐
+│   mock-server   │◄───────│  pipeline-service    │───────►│  PostgreSQL  │
+│  Flask · :5000  │  HTTP  │  FastAPI · :8000     │  ORM   │    :5432     │
+│  JSON file store│        │  ingestion + query   │        │              │
+└─────────────────┘        └──────────────────────┘        └──────────────┘
+```
+
+- **mock-server** — Flask REST API serving customer data from a JSON file
+- **pipeline-service** — FastAPI service that fetches from mock-server, upserts into Postgres, and exposes a query API
+- **postgres** — Persistent store for ingested customer data
 
 ## Tech Stack
 
-- **Python 3.12**
-- **Flask 3.x** — web framework
-- **Gunicorn** — production WSGI server
-- **Docker** — containerization
+| Service          | Stack                                      |
+|------------------|--------------------------------------------|
+| mock-server      | Python 3.12, Flask 3.x, Gunicorn           |
+| pipeline-service | Python 3.12, FastAPI, SQLAlchemy, Uvicorn  |
+| database         | PostgreSQL 15                              |
+| orchestration    | Docker Compose                             |
 
 ## Project Structure
 
 ```
 mock-customer-data-server/
-├── app/
-│   ├── app.py                  # App factory
-│   ├── routes/
-│   │   ├── customer_routes.py  # Customer endpoints
-│   │   └── health_routes.py    # Health check endpoint
-│   ├── services/
-│   │   └── customer_service.py # Business logic
-│   └── utils/
-│       ├── json_loader.py      # Loads customer data from JSON
-│       └── pagination.py       # Pagination helper
-├── data/
-│   └── customers.json          # Mock customer records
-├── Dockerfile
-├── requirements.txt
-├── run.py                      # Entry point
-└── .env.example
+├── docker-compose.yml
+├── mock-server/
+│   ├── app/
+│   │   ├── app.py                  # App factory
+│   │   ├── routes/
+│   │   │   ├── customer_routes.py
+│   │   │   └── health_routes.py
+│   │   ├── services/
+│   │   │   └── customer_service.py
+│   │   └── utils/
+│   │       ├── json_loader.py
+│   │       └── pagination.py
+│   ├── data/
+│   │   └── customers.json          # Mock customer records
+│   ├── Dockerfile
+│   ├── main.py                     # Entry point
+│   └── requirements.txt
+└── pipeline-service/
+    ├── models/
+    │   └── customer.py             # SQLAlchemy model
+    ├── schemas/
+    │   └── customer.py             # Pydantic response schema
+    ├── services/
+    │   └── ingestion.py            # Fetch + upsert logic
+    ├── database.py                 # DB engine + session
+    ├── main.py                     # FastAPI app + routes
+    ├── Dockerfile
+    └── requirements.txt
 ```
 
 ## Getting Started
 
 ### Prerequisites
 
-- Python 3.12+
-- pip
+- Docker
+- Docker Compose
 
-### Local Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/NaufalFadhil/ANCSTRAT_Mock-Customer-Data-Server.git mock-customer-data-server
-cd mock-customer-data-server
-
-# Create and activate a virtual environment
-python3 -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Start the development server
-python run.py
-```
-
-The server will start at `http://localhost:5000`.
-
-### Docker
+### Setup Environment
 
 ```bash
-# Build the image
-docker build -t mock-customer-data-server .
-
-# Run the container
-docker run -p 5000:5000 --name mock-customer-data-server mock-customer-data-server
+cp pipeline-service/.env.example pipeline-service/.env
 ```
+
+Then edit `pipeline-service/.env` with your credentials:
+
+```env
+DATABASE_URL=postgresql://postgres:password@postgres:5432/customer_db
+MOCK_SERVER_URL=http://mock-server:5000/api/customers
+```
+
+### Run with Docker Compose
+
+```bash
+# Build and start all services
+docker compose up --build
+
+# Stop and remove containers + images + volumes
+docker compose down --rmi local -v
+```
+
+| Service          | URL                          |
+|------------------|------------------------------|
+| mock-server      | http://localhost:5000        |
+| pipeline-service | http://localhost:8000        |
+| postgres         | localhost:5432               |
+
+---
 
 ## API Reference
 
-### Health Check
+### mock-server (port 5000)
+
+#### Health Check
 
 ```
-GET /api/health/
+GET /api/health
 ```
 
 **Response `200`**
 ```json
 {
   "success": true,
-  "message": "Service is healty"
+  "message": "Service is healthy"
 }
 ```
 
 ---
 
-### List Customers
+#### List Customers
 
 ```
-GET /api/customers/
+GET /api/customers
 ```
 
 **Query Parameters**
 
-| Parameter | Type    | Default | Description               |
-|-----------|---------|---------|---------------------------|
-| `page`    | integer | `1`     | Page number (1-indexed)   |
-| `limit`   | integer | `1`     | Number of records per page|
+| Parameter | Type    | Default | Description                |
+|-----------|---------|---------|----------------------------|
+| `page`    | integer | `1`     | Page number (1-indexed)    |
+| `limit`   | integer | `10`    | Number of records per page |
 
 **Response `200`**
 ```json
 {
-  "data": [
-    {
-      "customer_id": "2dfc55fe-852b-4ac1-a695-659d76cb57c3",
-      "first_name": "Steve",
-      "last_name": "Walker",
-      "email": "steve.walker@example.com",
-      "phone": "+1-555-888-8888",
-      "address": "678 Oak St, Anytown, USA",
-      "date_of_birth": "1985-11-12",
-      "account_balance": 3600.00,
-      "created_at": "2023-12-01T20:00:00Z"
-    }
-  ],
+  "data": [...],
   "total": 20,
   "page": 1,
-  "limit": 1
+  "limit": 10
 }
 ```
 
 ---
 
-### Get Customer by ID
+#### Get Customer by ID
 
 ```
 GET /api/customers/<customer_id>
 ```
 
-**Path Parameters**
-
-| Parameter     | Type   | Description         |
-|---------------|--------|---------------------|
-| `customer_id` | string | UUID of the customer|
-
-**Response `200`**
-```json
-{
-  "customer_id": "2dfc55fe-852b-4ac1-a695-659d76cb57c3",
-  "first_name": "Steve",
-  "last_name": "Walker",
-  "email": "steve.walker@example.com",
-  "phone": "+1-555-888-8888",
-  "address": "678 Oak St, Anytown, USA",
-  "date_of_birth": "1985-11-12",
-  "account_balance": 3600.00,
-  "created_at": "2023-12-01T20:00:00Z"
-}
-```
+**Response `200`** — single customer object
 
 **Response `404`**
 ```json
@@ -165,31 +157,80 @@ GET /api/customers/<customer_id>
 }
 ```
 
+---
+
+### pipeline-service (port 8000)
+
+#### Trigger Ingestion
+
+```
+POST /api/ingest
+```
+
+Fetches all customers from mock-server and upserts them into Postgres. No request body required.
+
+**Response `200`**
+```json
+{
+  "status": "success",
+  "records_processed": 20
+}
+```
+
+---
+
+#### List Customers (from DB)
+
+```
+GET /api/customers
+```
+
+**Query Parameters**
+
+| Parameter | Type    | Default | Max  | Description                |
+|-----------|---------|---------|------|----------------------------|
+| `page`    | integer | `1`     | —    | Page number (1-indexed)    |
+| `limit`   | integer | `10`    | `100`| Number of records per page |
+
+**Response `200`** — array of customer objects
+
+---
+
+#### Get Customer by ID (from DB)
+
+```
+GET /api/customers/{customer_id}
+```
+
+**Response `200`** — single customer object
+
+**Response `404`**
+```json
+{
+  "detail": "Customer not found"
+}
+```
+
+---
+
 ## Customer Data Schema
 
-Each customer record contains the following fields:
-
-| Field             | Type    | Description                        |
-|-------------------|---------|------------------------------------|
-| `customer_id`     | UUID    | Unique identifier                  |
-| `first_name`      | string  | First name                         |
-| `last_name`       | string  | Last name                          |
-| `email`           | string  | Email address                      |
-| `phone`           | string  | Phone number                       |
-| `address`         | string  | Mailing address                    |
-| `date_of_birth`   | date    | Date of birth (`YYYY-MM-DD`)       |
-| `account_balance` | number  | Current account balance            |
-| `created_at`      | datetime| Record creation timestamp (ISO 8601)|
+| Field             | Type     | Description                         |
+|-------------------|----------|-------------------------------------|
+| `customer_id`     | UUID     | Unique identifier                   |
+| `first_name`      | string   | First name                          |
+| `last_name`       | string   | Last name                           |
+| `email`           | string   | Email address                       |
+| `phone`           | string   | Phone number                        |
+| `address`         | string   | Mailing address                     |
+| `date_of_birth`   | date     | Date of birth (`YYYY-MM-DD`)        |
+| `account_balance` | decimal  | Current account balance             |
+| `created_at`      | datetime | Record creation timestamp (ISO 8601)|
 
 ## Environment Variables
 
-Copy `.env.example` to `.env` and adjust as needed.
+Postgres connection is configured via `DATABASE_URL` in `docker-compose.yml`.
 
-```bash
-cp .env.example .env
-```
-
-| Variable    | Default | Description               |
-|-------------|---------|---------------------------|
-| `FLASK_ENV` | `development` | Flask environment   |
-| `PORT`      | `5000`  | Port the server listens on|
+| Variable       | Default                                              | Description             |
+|----------------|------------------------------------------------------|-------------------------|
+| `DATABASE_URL` | `postgresql://postgres:password@postgres:5432/customer_db` | Postgres connection string |
